@@ -39,7 +39,7 @@ In Termux on the Redmi 4:
 
 ```bash
 pkg update -y && pkg install -y git
-git clone <your-repo-url> verus && cd verus
+git clone https://github.com/BIGSUS24/verus-miner-termux verus && cd verus
 chmod +x mine.sh
 ./mine.sh
 ```
