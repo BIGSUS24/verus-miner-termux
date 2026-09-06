@@ -59,7 +59,7 @@ pkg install -y termux-api      # then install the Termux:API app too
 ./mine.sh --bench       # 60s hashrate test, tells you what this phone really does
 ./mine.sh --selftest    # verify the thermal guard logic
 THREADS=4 ./mine.sh     # fewer threads = cooler, slower
-POOL=na.luckpool.net:3956 ./mine.sh    # North America instead of EU
+POOL=eu.luckpool.net:3957 ./mine.sh    # Europe instead of Asia-Pacific
 CPU=generic ./mine.sh                   # if the a53 build misbehaves
 HOT=45 COOL=40 ./mine.sh               # stricter thermal limits
 ```
@@ -145,7 +145,7 @@ transactions are still reportable.
 | `No readable battery temperature` | Install Termux:API app + `pkg install termux-api` |
 | Dies when screen off | `termux-wake-lock`, and disable MIUI battery optimisation for Termux |
 | Phone very hot | Lower `THREADS`, lower `HOT`, take the case off |
-| Zero shares after 10 min | Wrong pool region — try `POOL=na.luckpool.net:3956` |
+| Zero shares after 10 min | Wrong pool region — try `POOL=eu.luckpool.net:3957` |
 
 Check `~/verus-miner/miner.log` for the miner's own output.
 

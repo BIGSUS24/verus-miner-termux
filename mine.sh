@@ -17,7 +17,7 @@ LOG="$DIR/miner.log"
 CPU="${CPU:-a53}"
 BIN_URL="https://raw.githubusercontent.com/Darktron/pre-compiled/$CPU/ccminer"
 
-POOL="${POOL:-eu.luckpool.net:3956}"     # na.luckpool.net:3956 for North America
+POOL="${POOL:-ap.luckpool.net:3957}"     # eu. or na. also available; 3957 is the CPU port
 WORKER="${WORKER:-redmi4}"
 THREADS="${THREADS:-6}"                  # of 8 cores; headroom keeps heat down
 
