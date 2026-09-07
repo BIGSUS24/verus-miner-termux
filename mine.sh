@@ -117,9 +117,31 @@ install_miner() {
   if printf '%s' "$probe" | grep -qiE 'cannot link|library .* not found|CANNOT LINK'; then
     printf '%s\n' "$probe" | head -8 >&2
     echo >&2
+    # Map the missing soname to the Termux package that provides it. A naive
+    # strip of the .so suffix is wrong for several of these: libcrypto.so.3
+    # comes from openssl, not from a package called libcrypto.
+    local miss pkgname
+    miss=$(printf '%s' "$probe" | sed -n 's/.*library "\([^"]*\)" not found.*/\1/p' | head -1)
+    case "$miss" in
+      libjansson*)         pkgname=libjansson ;;
+      libcurl*)            pkgname=libcurl ;;
+      libcrypto*|libssl*)  pkgname=openssl ;;
+      libc++*)             pkgname=libc++ ;;
+      libz*)               pkgname=zlib ;;
+      *)                   pkgname="" ;;
+    esac
+    if [ -n "$pkgname" ]; then
+      die "The miner cannot load $miss (see above). Install it with:
+
+    pkg install -y $pkgname
+
+Installing that package on its own avoids any unrelated upgrade that may be
+404ing on a stale mirror. If it 404s too, run 'termux-change-repo', pick a
+different main mirror, then 'pkg update', then run this script again."
+    fi
     die "The miner downloaded but cannot load a shared library (see above).
-Install the missing one with 'pkg install <name>'. If the package exists but
-apt 404s on it, switch mirrors: termux-change-repo, then pkg update."
+Install the package that provides it with 'pkg install <name>'. If apt 404s
+on it, switch mirrors: termux-change-repo, then pkg update."
   fi
 
   say "Installed, aarch64 verified, libraries resolve"
