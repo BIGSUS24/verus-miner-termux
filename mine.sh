@@ -89,19 +89,17 @@ verify_elf() {
 
 install_miner() {
   say "Installing dependencies"
+  # A failure here is often apt being unable to UPGRADE a package that is
+  # already installed and working (a stale mirror serving a 404). That does
+  # not mean the miner cannot run, so warn rather than abort. What actually
+  # matters is whether the binary links, which is checked below.
   local out
   if ! out=$(pkg install -y curl libcurl openssl libjansson libc++ zlib 2>&1); then
-    printf '%s\n' "$out" | tail -25 >&2
+    printf '%s\n' "$out" | tail -15 >&2
     echo >&2
-    die "pkg install failed - the real error is printed above.
-
-Common causes:
-  * Termux installed from the Play Store. That build is abandoned and its
-    package repos are gone. Install from F-Droid or from
-    github.com/termux/termux-app instead.
-  * Stale mirror. Run 'termux-change-repo', pick a main mirror, then
-    'pkg update' and try again.
-  * No network, or a mirror is temporarily down - retry in a few minutes."
+    warn "Some packages did not install (output above). Continuing anyway -"
+    warn "the real test is whether the miner runs. If it does not, try:"
+    warn "  termux-change-repo   (pick a different main mirror), then pkg update"
   fi
 
   say "Downloading ccminer (Cortex-$CPU build)"
@@ -112,7 +110,19 @@ Common causes:
 
   verify_elf "$BIN" || die "Downloaded file is not a 64-bit ARM binary.
        This device reports: $(uname -m)   (need aarch64)"
-  say "Installed, aarch64 verified"
+
+  # Confirm the dynamic linker can actually resolve every shared library.
+  local probe=""
+  probe=$("$BIN" --help 2>&1 | head -20) || true
+  if printf '%s' "$probe" | grep -qiE 'cannot link|library .* not found|CANNOT LINK'; then
+    printf '%s\n' "$probe" | head -8 >&2
+    echo >&2
+    die "The miner downloaded but cannot load a shared library (see above).
+Install the missing one with 'pkg install <name>'. If the package exists but
+apt 404s on it, switch mirrors: termux-change-repo, then pkg update."
+  fi
+
+  say "Installed, aarch64 verified, libraries resolve"
 }
 
 setup_wallet() {
