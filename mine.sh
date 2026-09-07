@@ -2,8 +2,8 @@
 # Verus (VRSC) miner for Android/Termux on ARM64.
 # Runs natively in Termux - no proot, no Ubuntu container, no compiling.
 #   ./mine.sh              start mining
-#   ./mine.sh --selftest   run the thermal-guard checks
 #   ./mine.sh --bench      hashrate benchmark, no pool, up to 120s
+#   ./mine.sh --selftest   run the address-validation checks
 set -euo pipefail
 
 DIR="$HOME/verus-miner"
@@ -19,68 +19,11 @@ BIN_URL="https://raw.githubusercontent.com/Darktron/pre-compiled/$CPU/ccminer"
 
 POOL="${POOL:-ap.luckpool.net:3957}"     # eu. or na. also available; 3957 is the CPU port
 WORKER="${WORKER:-redmi4}"
-THREADS="${THREADS:-6}"                  # of 8 cores; headroom keeps heat down
-
-GUARD="${GUARD:-off}"  # "on" pauses the miner when hot; off by default
-HOT="${HOT:-48}"       # pause at or above this temp (C) when GUARD=on
-COOL="${COOL:-42}"     # resume below this
-POLL="${POLL:-20}"     # seconds between temp checks
+THREADS="${THREADS:-$(nproc)}"           # every core, full speed
 
 say()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31mxxx\033[0m %s\n' "$*" >&2; exit 1; }
-
-# --- thermal helpers -------------------------------------------------------
-
-# Kernels report battery temp in decidegrees (350 = 35.0C) or plain degrees.
-norm_temp() {
-  local v="$1"
-  case "$v" in ''|*[!0-9-]*) return 1;; esac
-  # Three scales occur in the wild: millidegrees (thermal_zone, 35700),
-  # decidegrees (battery sysfs, 357) and plain degrees (35).
-  if   [ "$v" -gt 10000 ]; then echo $((v / 1000))
-  elif [ "$v" -gt 200 ];   then echo $((v / 10))
-  else echo "$v"; fi
-}
-
-TEMP_SRC=""
-find_temp_source() {
-  local p
-  for p in /sys/class/power_supply/battery/temp \
-           /sys/class/power_supply/bms/temp \
-           /sys/devices/virtual/power_supply/battery/temp \
-           /sys/class/thermal/thermal_zone0/temp; do
-    if [ -r "$p" ] && norm_temp "$(cat "$p" 2>/dev/null || echo x)" >/dev/null 2>&1; then
-      TEMP_SRC="$p"; return 0
-    fi
-  done
-  if command -v termux-battery-status >/dev/null 2>&1; then
-    TEMP_SRC="api"; return 0
-  fi
-  return 1
-}
-
-read_temp() {
-  local v
-  if [ "$TEMP_SRC" = "api" ]; then
-    v=$(termux-battery-status 2>/dev/null \
-        | sed -n 's/.*"temperature"[: ]*\([0-9.]*\).*/\1/p' | cut -d. -f1)
-    norm_temp "${v:-x}"
-  else
-    norm_temp "$(cat "$TEMP_SRC" 2>/dev/null || echo x)"
-  fi
-}
-
-# Given current temp and whether we are currently paused, say what to do.
-# Hysteresis: only pause at/above HOT, only resume below COOL.
-decide() {
-  local t="$1" paused="$2"
-  if [ "$paused" = "1" ]; then
-    [ "$t" -lt "$COOL" ] && echo resume || echo hold
-  else
-    [ "$t" -ge "$HOT" ] && echo pause || echo hold
-  fi
-}
 
 # --- setup -----------------------------------------------------------------
 
@@ -156,7 +99,7 @@ setup_wallet() {
   [ -f "$WALLET_FILE" ] && return 0
   echo
   echo "Need a Verus R-address to be paid to."
-  echo "Get one from the Verus Mobile app. Must start with R."
+  echo "Get one from Verus Desktop or Verus Mobile. Must start with R."
   echo "An exchange deposit address will NOT merge-mine - use a wallet address."
   echo
   local addr confirm
@@ -178,59 +121,28 @@ setup_wallet() {
 
 # --- run -------------------------------------------------------------------
 
-MINER_PID=""
 cleanup() {
-  if [ -n "$MINER_PID" ]; then
-    # A SIGSTOPped process will not act on SIGTERM until it is resumed first.
-    kill -CONT "$MINER_PID" 2>/dev/null || true
-    kill "$MINER_PID" 2>/dev/null || true
-  fi
   command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock 2>/dev/null || true
-  echo
-  say "Stopped."
 }
 trap cleanup EXIT INT TERM
 
 run() {
   local wallet; wallet=$(cat "$WALLET_FILE")
 
-  if ! find_temp_source && [ "$GUARD" = "on" ]; then
-    die "GUARD=on was requested but no temperature source is readable.
-Install the Termux:API app plus 'pkg install termux-api', or drop GUARD."
-  fi
-
   command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock 2>/dev/null || true
 
   say "Pool     $POOL"
   say "Wallet   $wallet"
-  say "Threads  $THREADS of $(nproc)"
-  if [ "$GUARD" = "on" ]; then
-    say "Thermal  pause >= ${HOT}C, resume < ${COOL}C  (source: $TEMP_SRC)"
-  else
-    say "Thermal  guard off, full speed. GUARD=on to enable pausing."
-  fi
+  say "Threads  $THREADS of $(nproc)  (full speed)"
   say "Log      $LOG"
   say "Stats    https://luckpool.net/verus/miner/$wallet"
+  say "Ctrl+C to stop."
   echo
 
+  # Foreground with tee: hashrate is visible live here and still written to
+  # the log, so no second Termux session is needed to watch it.
   "$BIN" -a verus -o "stratum+tcp://$POOL" -u "$wallet.$WORKER" -p x -t "$THREADS" \
-    >> "$LOG" 2>&1 &
-  MINER_PID=$!
-
-  local paused=0 t action
-  while kill -0 "$MINER_PID" 2>/dev/null; do
-    if [ "$GUARD" = "on" ] && t=$(read_temp) && [ -n "$t" ]; then
-      action=$(decide "$t" "$paused")
-      case "$action" in
-        pause)  kill -STOP "$MINER_PID"; paused=1; warn "${t}C - too hot, paused";;
-        resume) kill -CONT "$MINER_PID"; paused=0; say  "${t}C - cooled, resumed";;
-      esac
-    fi
-    sleep "$POLL"
-  done
-  MINER_PID=""
-  warn "Miner exited. Last lines of $LOG:"
-  tail -5 "$LOG" 2>/dev/null || true
+    2>&1 | tee -a "$LOG"
 }
 
 # --- selftest --------------------------------------------------------------
@@ -241,30 +153,23 @@ selftest() {
     if [ "$1" = "$2" ]; then echo "  ok   $3"
     else echo "  FAIL $3 (expected '$1', got '$2')"; f=1; fi
   }
-  echo "norm_temp:"
-  check 35 "$(norm_temp 350)" "350 decidegrees -> 35C"
-  check 35 "$(norm_temp 35)"  "35 degrees -> 35C"
-  check 52 "$(norm_temp 520)" "520 decidegrees -> 52C"
-  check 35 "$(norm_temp 35700)" "35700 millidegrees -> 35C  (thermal_zone)"
-  check 48 "$(norm_temp 48200)" "48200 millidegrees -> 48C"
-  norm_temp "abc" >/dev/null 2>&1 && { echo "  FAIL rejects junk"; f=1; } || echo "  ok   rejects junk"
-  norm_temp ""    >/dev/null 2>&1 && { echo "  FAIL rejects empty"; f=1; } || echo "  ok   rejects empty"
-
-  echo "decide (HOT=$HOT COOL=$COOL):"
-  check hold   "$(decide 40 0)" "running, 40C -> keep going"
-  check pause  "$(decide 48 0)" "running, at HOT -> pause"
-  check pause  "$(decide 55 0)" "running, 55C -> pause"
-  check hold   "$(decide 45 1)" "paused, 45C still above COOL -> stay paused"
-  check resume "$(decide 41 1)" "paused, below COOL -> resume"
-  check hold   "$(decide 47 0)" "running, just under HOT -> keep going"
-
   echo "wallet regex:"
   wt() { if echo "$1" | grep -Eq '^R[1-9A-HJ-NP-Za-km-z]{33}$'; then echo accept; else echo reject; fi; }
-  check accept "$(wt RQVsJRf98RDCJi8W4KtnbUW2vCpq1qGuAJ)"  "valid 34-char R-address"
-  check reject "$(wt RQVsJRf98RDCJi8W4KtnbUW2vCpq1qGuA)"   "too short"
-  check reject "$(wt R0VsJRf98RDCJi8W4KtnbUW2vCpq1qGuAJ)"  "contains 0 (not base58)"
-  check reject "$(wt 1QVsJRf98RDCJi8W4KtnbUW2vCpq1qGuAJ)"  "bitcoin address"
+  check accept "$(wt RTPkQa2PPdhNBGXMDDNpqAH8KZrfJZFyn4)"  "valid 34-char R-address"
+  check reject "$(wt RTPkQa2PPdhNBGXMDDNpqAH8KZrfJZFyn)"   "33 chars, too short"
+  check reject "$(wt RTPkQa2PPdhNBGXMDDNpqAH8KZrfJZFyn44)" "35 chars, too long"
+  check reject "$(wt R0PkQa2PPdhNBGXMDDNpqAH8KZrfJZFyn4)"  "contains 0, not base58"
+  check reject "$(wt ROPkQa2PPdhNBGXMDDNpqAH8KZrfJZFyn4)"  "contains O, not base58"
+  check reject "$(wt UsX7yGJtSwQNFpGsMUwrTVjjJ1zYwNnMq8dZTbyrfbcktnknBPLk)" "private key, not an address"
+  check reject "$(wt 1PkQa2PPdhNBGXMDDNpqAH8KZrfJZFyn4A)"  "bitcoin address"
   check reject "$(wt '')"                                   "empty"
+
+  echo "elf verifier:"
+  printf '\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x03\x00\xb7\x00' > /tmp/_ok.bin
+  printf 'not an elf file at all here ok' > /tmp/_bad.bin
+  verify_elf /tmp/_ok.bin  && echo "  ok   accepts aarch64 ELF" || { echo "  FAIL accepts aarch64 ELF"; f=1; }
+  verify_elf /tmp/_bad.bin && { echo "  FAIL rejects non-ELF"; f=1; } || echo "  ok   rejects non-ELF"
+  rm -f /tmp/_ok.bin /tmp/_bad.bin
 
   [ "$f" = 0 ] && echo "PASS" || { echo "FAIL"; exit 1; }
 }
@@ -281,10 +186,8 @@ mkdir -p "$DIR"
 case "${1:-}" in
   --bench)
     say "Benchmark on $THREADS threads, no pool. Runs up to 120s."
-    say "First hashrate line can take 30-60s on a slow CPU. Ctrl+C to stop early."
+    say "Ctrl+C to stop early."
     echo
-    # Stream the output. Piping to tail buffers it, so nothing appeared until
-    # the process ended - which hid the hashrate entirely on the first run.
     timeout 120 "$BIN" -a verus --benchmark -t "$THREADS" 2>&1 || true
     exit 0;;
 esac

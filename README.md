@@ -58,26 +58,10 @@ pkg install -y termux-api      # then install the Termux:API app too
 ```bash
 ./mine.sh --bench       # 60s hashrate test, tells you what this phone really does
 ./mine.sh --selftest    # verify the thermal guard logic
-THREADS=4 ./mine.sh     # fewer threads = cooler, slower
+THREADS=4 ./mine.sh     # use fewer cores (default: all of them)
 POOL=eu.luckpool.net:3957 ./mine.sh    # Europe instead of Asia-Pacific
 CPU=generic ./mine.sh                   # if the a53 build misbehaves
-GUARD=on ./mine.sh                     # pause the miner when hot (off by default)
-GUARD=on HOT=45 COOL=40 ./mine.sh      # stricter thresholds
 ```
-
-### Thermal guard (off by default)
-
-By default the miner runs at full speed and is never paused.
-
-`GUARD=on` enables pausing: temperature is read every 20s, the miner is
-stopped with SIGSTOP at or above 48C and resumed below 42C. The gap prevents
-rapid stop/start cycling.
-
-Temperature is read from the first readable source among the battery sysfs
-paths, then `thermal_zone0`, then Termux:API. Values arrive as millidegrees
-(35700), decidegrees (357) or plain degrees (35) depending on the source, and
-are normalised. Note that `thermal_zone0` is CPU temperature, not battery, and
-runs considerably hotter -- raise `HOT` accordingly if that is the source.
 
 ---
 
@@ -147,8 +131,8 @@ transactions are still reportable.
 | `pkg install failed` | `pkg update && pkg upgrade`, retry |
 | `Binary will not run` | `uname -m` must be `aarch64` |
 | `No readable battery temperature` | Install Termux:API app + `pkg install termux-api` |
-| Dies when screen off | `termux-wake-lock`, and disable MIUI battery optimisation for Termux |
-| Phone very hot | Lower `THREADS`, lower `HOT`, take the case off |
+| Dies when screen off | Disable MIUI battery optimisation and enable autostart for Termux |
+| Phone very hot | Lower `THREADS`, or take the case off |
 | Zero shares after 10 min | Wrong pool region — try `POOL=eu.luckpool.net:3957` |
 
 Check `~/verus-miner/miner.log` for the miner's own output.
