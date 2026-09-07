@@ -89,8 +89,20 @@ verify_elf() {
 
 install_miner() {
   say "Installing dependencies"
-  pkg install -y curl libcurl openssl libjansson libc++ zlib >/dev/null 2>&1 \
-    || die "pkg install failed. Run: pkg update && pkg upgrade, then retry."
+  local out
+  if ! out=$(pkg install -y curl libcurl openssl libjansson libc++ zlib 2>&1); then
+    printf '%s\n' "$out" | tail -25 >&2
+    echo >&2
+    die "pkg install failed - the real error is printed above.
+
+Common causes:
+  * Termux installed from the Play Store. That build is abandoned and its
+    package repos are gone. Install from F-Droid or from
+    github.com/termux/termux-app instead.
+  * Stale mirror. Run 'termux-change-repo', pick a main mirror, then
+    'pkg update' and try again.
+  * No network, or a mirror is temporarily down - retry in a few minutes."
+  fi
 
   say "Downloading ccminer (Cortex-$CPU build)"
   curl -fL --progress-bar -o "$BIN" "$BIN_URL" \
