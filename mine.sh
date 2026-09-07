@@ -3,7 +3,7 @@
 # Runs natively in Termux - no proot, no Ubuntu container, no compiling.
 #   ./mine.sh              start mining
 #   ./mine.sh --selftest   run the thermal-guard checks
-#   ./mine.sh --bench      60s hashrate benchmark, no pool
+#   ./mine.sh --bench      hashrate benchmark, no pool, up to 120s
 set -euo pipefail
 
 DIR="$HOME/verus-miner"
@@ -269,8 +269,12 @@ mkdir -p "$DIR"
 
 case "${1:-}" in
   --bench)
-    say "60s benchmark on $THREADS threads, no pool"
-    timeout 60 "$BIN" -a verus --benchmark -t "$THREADS" 2>&1 | tail -20 || true
+    say "Benchmark on $THREADS threads, no pool. Runs up to 120s."
+    say "First hashrate line can take 30-60s on a slow CPU. Ctrl+C to stop early."
+    echo
+    # Stream the output. Piping to tail buffers it, so nothing appeared until
+    # the process ended - which hid the hashrate entirely on the first run.
+    timeout 120 "$BIN" -a verus --benchmark -t "$THREADS" 2>&1 || true
     exit 0;;
 esac
 
