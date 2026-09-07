@@ -21,7 +21,8 @@ POOL="${POOL:-ap.luckpool.net:3957}"     # eu. or na. also available; 3957 is th
 WORKER="${WORKER:-redmi4}"
 THREADS="${THREADS:-6}"                  # of 8 cores; headroom keeps heat down
 
-HOT="${HOT:-48}"       # pause mining at or above this battery temp (C)
+GUARD="${GUARD:-off}"  # "on" pauses the miner when hot; off by default
+HOT="${HOT:-48}"       # pause at or above this temp (C) when GUARD=on
 COOL="${COOL:-42}"     # resume below this
 POLL="${POLL:-20}"     # seconds between temp checks
 
@@ -35,7 +36,11 @@ die()  { printf '\033[1;31mxxx\033[0m %s\n' "$*" >&2; exit 1; }
 norm_temp() {
   local v="$1"
   case "$v" in ''|*[!0-9-]*) return 1;; esac
-  if [ "$v" -gt 200 ]; then echo $((v / 10)); else echo "$v"; fi
+  # Three scales occur in the wild: millidegrees (thermal_zone, 35700),
+  # decidegrees (battery sysfs, 357) and plain degrees (35).
+  if   [ "$v" -gt 10000 ]; then echo $((v / 1000))
+  elif [ "$v" -gt 200 ];   then echo $((v / 10))
+  else echo "$v"; fi
 }
 
 TEMP_SRC=""
@@ -189,17 +194,21 @@ trap cleanup EXIT INT TERM
 run() {
   local wallet; wallet=$(cat "$WALLET_FILE")
 
-  find_temp_source || die "No readable battery temperature on this device.
-The thermal guard is the only thing protecting a 2017 battery from sustained
-full-load heat. Install the Termux:API app plus 'pkg install termux-api',
-or re-run with HOT=999 to mine without a guard at your own risk."
+  if ! find_temp_source && [ "$GUARD" = "on" ]; then
+    die "GUARD=on was requested but no temperature source is readable.
+Install the Termux:API app plus 'pkg install termux-api', or drop GUARD."
+  fi
 
   command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock 2>/dev/null || true
 
   say "Pool     $POOL"
   say "Wallet   $wallet"
   say "Threads  $THREADS of $(nproc)"
-  say "Thermal  pause >= ${HOT}C, resume < ${COOL}C  (source: $TEMP_SRC)"
+  if [ "$GUARD" = "on" ]; then
+    say "Thermal  pause >= ${HOT}C, resume < ${COOL}C  (source: $TEMP_SRC)"
+  else
+    say "Thermal  guard off, full speed. GUARD=on to enable pausing."
+  fi
   say "Log      $LOG"
   say "Stats    https://luckpool.net/verus/miner/$wallet"
   echo
@@ -210,7 +219,7 @@ or re-run with HOT=999 to mine without a guard at your own risk."
 
   local paused=0 t action
   while kill -0 "$MINER_PID" 2>/dev/null; do
-    if t=$(read_temp) && [ -n "$t" ]; then
+    if [ "$GUARD" = "on" ] && t=$(read_temp) && [ -n "$t" ]; then
       action=$(decide "$t" "$paused")
       case "$action" in
         pause)  kill -STOP "$MINER_PID"; paused=1; warn "${t}C - too hot, paused";;
@@ -236,6 +245,8 @@ selftest() {
   check 35 "$(norm_temp 350)" "350 decidegrees -> 35C"
   check 35 "$(norm_temp 35)"  "35 degrees -> 35C"
   check 52 "$(norm_temp 520)" "520 decidegrees -> 52C"
+  check 35 "$(norm_temp 35700)" "35700 millidegrees -> 35C  (thermal_zone)"
+  check 48 "$(norm_temp 48200)" "48200 millidegrees -> 48C"
   norm_temp "abc" >/dev/null 2>&1 && { echo "  FAIL rejects junk"; f=1; } || echo "  ok   rejects junk"
   norm_temp ""    >/dev/null 2>&1 && { echo "  FAIL rejects empty"; f=1; } || echo "  ok   rejects empty"
 

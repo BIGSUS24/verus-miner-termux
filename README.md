@@ -61,19 +61,23 @@ pkg install -y termux-api      # then install the Termux:API app too
 THREADS=4 ./mine.sh     # fewer threads = cooler, slower
 POOL=eu.luckpool.net:3957 ./mine.sh    # Europe instead of Asia-Pacific
 CPU=generic ./mine.sh                   # if the a53 build misbehaves
-HOT=45 COOL=40 ./mine.sh               # stricter thermal limits
+GUARD=on ./mine.sh                     # pause the miner when hot (off by default)
+GUARD=on HOT=45 COOL=40 ./mine.sh      # stricter thresholds
 ```
 
-### Thermal guard
+### Thermal guard (off by default)
 
-Reads battery temp every 20s. **Pauses** the miner at ≥48°C (SIGSTOP),
-**resumes** below 42°C. The gap prevents rapid stop/start cycling.
+By default the miner runs at full speed and is never paused.
 
-If no temperature source is readable the script refuses to start. That's
-deliberate — sustained full load on a nine-year-old lithium cell is how pouch
-cells swell. Install Termux:API to give it a temp source, or pass `HOT=999` to
-override consciously. Check the back cover for bulging every few weeks; if it
-is no longer flat, stop and dispose of the battery at an e-waste point.
+`GUARD=on` enables pausing: temperature is read every 20s, the miner is
+stopped with SIGSTOP at or above 48C and resumed below 42C. The gap prevents
+rapid stop/start cycling.
+
+Temperature is read from the first readable source among the battery sysfs
+paths, then `thermal_zone0`, then Termux:API. Values arrive as millidegrees
+(35700), decidegrees (357) or plain degrees (35) depending on the source, and
+are normalised. Note that `thermal_zone0` is CPU temperature, not battery, and
+runs considerably hotter -- raise `HOT` accordingly if that is the source.
 
 ---
 
